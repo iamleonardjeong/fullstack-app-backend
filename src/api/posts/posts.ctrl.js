@@ -1,126 +1,181 @@
-let postId = 1; // id의 초기값
+import Post from '../../models/post';
+import mongoose from 'mongoose';
+import Joi from 'joi';
 
-// posts 배열 초기 데이터
-const posts = [
+// 포스트의 인스턴스를 만들 때는 new 키워드를 사용 그리고 생성자 함수의 파라미터에 정보를 지닌 객체를 넣는다.
+// 데이터 저장 - save() 함수를 실생시켜야 DB에 저장된다.
+// 데이터 조회 - 모델 인스턴스의 find() 함수를 사용 find() 함수를 호출한 후에는 exec()를 붙여 주어야 서버에 쿼리를 요청한다.
+// 특정 데이터 조회 - findById() 함수를 사용
+// remove() - 특정 조건을 만족하는 데이터를 모두 지운다.
+// findByIdAndRemove(): id를 찾아서 지운₩₩다.
+// findOneAndRemove(): 특정 조건을 만족하는 데이터 하나를 찾아서 제거
+// findByIdAndUpdate(): 데이터를 업데이트. 첫 번째 파라미터는 id, 두 번째 파라미너틑 업데이트 내용, 세 번째 파라미터는 업데이트의 옵션
+// find() 함수에 exec() 함수를 붙여주어야 서버에 쿼리를 요청한다.
+// sort() 함수로 내림차순 정렬
+// limit() 함수로 보이는 개 수 제한
+// skip() 페이지 기능 구현
+
+const { ObjectId } = mongoose.Types;
+
+// 500 오류는 보통 서버에서 처리하지 않아 내부적으로 문제가 생겼을 때 발생한다.
+// 잘못된 id를 전달했다면 클아이언트가 요청을 잘못 보낸 것이니 400 Bad Request 오류를 띄워 주는 것이 맞다.
+// 그러려면 id 값이 올바른 ObjectId인지 확인해야 한다.
+// 이를 검증하기 위한 미들웨어 함수 생성
+export const checkObjectId = (ctx, next) => {
+  const { id } = ctx.params;
+  if (!ObjectId.isValid(id)) {
+    ctx.status = 400;
+    return;
+  }
+  return next();
+};
+
+/*
+  POST /api/posts
   {
-    id: 1,
     title: '제목',
     body: '내용',
-  },
-];
-
-/* 
-포스트 작성
-POST /api/posts
-{title, body}
+    tags: ['태그1', '태그2']
+  }
 */
-export const write = (ctx) => {
-  // REST API의 Request Body는 ctx.request.body에서 조회할 수 있다.
-  const { title, body } = ctx.request.body;
-  postId += 1; // 기존 postId 값에 1을 더한다.
-  const post = { id: postId, title, body };
-  posts.push(post);
-  ctx.body = post;
-};
+export const write = async (ctx) => {
+  const schema = Joi.object().keys({
+    // 객체가 다음 필드를 가지고 있음을 검증
+    title: Joi.string().required(), // required()가 있으면 필수 항목
+    body: Joi.string().required(),
+    tags: Joi.array() //
+      .items(Joi.string())
+      .required(), // 문자열로 이루어진 배열
+  });
 
-/*
-포스트 목록 조회
-GET /api/posts
-*/
-export const list = (ctx) => {
-  ctx.body = posts;
-};
-
-/*
-특정 포스트 조회
-GET /api/posts/:id
-*/
-export const read = (ctx) => {
-  const { id } = ctx.params;
-  // 주어진 id 값으로 포스트를 찾는다.
-  // 파라미터로 받아 온 값은 문자열 형식이므로 파라미터를 숫자로 변환하거나
-  // 비교할 P.id 값을 문자열로 변경해야 한다.
-  const post = posts.find((p) => p.id.toString() === id);
-  // 포스트가 없으면 오류를 반환
-  if (!post) {
-    ctx.status = 404;
-    ctx.body = {
-      message: '포스트가 존재하지 않습니다.',
-    };
+  // 검증 후 검증 실패인 경우 에러 처리
+  const result = schema.validate(ctx.request.body);
+  if (result.error) {
+    ctx.status = 400;
+    ctx.body = result.error;
     return;
   }
-  ctx.body = post;
+
+  const { title, body, tags } = ctx.request.body;
+  const post = new Post({
+    title,
+    body,
+    tags,
+  });
+  try {
+    await post.save();
+    ctx.body = post;
+  } catch (e) {
+    ctx.throw(500, e);
+  }
 };
 
 /*
-특정 포스트 제거
-DELETE /api/posts/:id
+  GET /api/posts
 */
-export const remove = (ctx) => {
-  const { id } = ctx.params;
-  // 해당 id를 가진 post가 몇 번째인지 확인
-  const index = posts.findIndex((p) => p.id.toString() === id);
-  // 포스트가 없으면 오류를 반환
-  if (index === -1) {
-    ctx.status = 404;
-    ctx.body = {
-      message: '포스트가 존재하지 않습니다.',
-    };
+export const list = async (ctx) => {
+  // query는 문자열이기 때문에 숫자로 변환해야 한다.
+  // 값이 주어지지 않았다면 1을 기본으로 사용
+  const page = parseInt(ctx.query.page || '1', 10);
+
+  if (page < 1) {
+    ctx.status = 400;
     return;
   }
-  // index번째 아이템을 제거
-  posts.splice(index, 1);
-  ctx.status = 204; // No Content
+
+  try {
+    // find() 함수에 exec() 함수를 붙여주어야 서버에 쿼리를 요청한다.
+    // sort 함수로 내림차순 정렬
+    // limit 함수로 보이는 개 수 제한
+    const posts = await Post.find() //
+      .sort({ _id: -1 })
+      .limit(10)
+      .skip((page - 1) * 10)
+      .exec();
+
+    const postCount = await Post.countDocuments().exec();
+    // 커스텀 HTTP 헤더
+    ctx.set('Last-Page', Math.ceil(postCount / 10));
+
+    ctx.body = posts //
+      .map((post) => post.toJSON())
+      .map((post) => ({
+        ...post,
+        body:
+          post.body.length < 200 ? post.body : `${post.body.slice(0, 200)}...`,
+      }));
+  } catch (e) {
+    ctx.throw(500, e);
+  }
 };
 
 /*
-포스트 수정(교체)
-PUT /api/posts/:id
-{ title, body }
+  GET /api/posts/:id
 */
-export const replace = (ctx) => {
+export const read = async (ctx) => {
   const { id } = ctx.params;
-  // 해당 id를 가진 post가 몇 번째인지 확인
-  const index = posts.findIndex((p) => p.id.toString() === id);
-  // 포스트가 없으면 오류를 반환
-  if (!index) {
-    ctx.status = 404;
-    ctx.body = {
-      message: '포스트가 존재하지 않습니다.',
-    };
-    return;
+  try {
+    const post = await Post.findById(id).exec();
+    if (!post) {
+      ctx.status = 404; // Not Found
+      return;
+    }
+    ctx.body = post;
+  } catch (e) {
+    ctx.throw(500, e);
   }
-  // 전체 객체를 덮어 씌운다.
-  // 따라서 id를 제외한 기존 정보를 날리고, 객체를 새로 만든다.
-  posts[index] = {
-    id,
-    ...ctx.request.body,
-  };
-  ctx.body = posts[index];
 };
 
 /*
-포스트 수정(특정 필드 변경)
-PATCH /api/posts/:id
-{ title, body }
+  DELETE /api/posts/:id
 */
-export const update = (ctx) => {
-  // PATCH 메서드는 주어진 필드만 교체
+export const remove = async (ctx) => {
   const { id } = ctx.params;
-  // 해당 id를 가진 post가 몇 번째인지 확인
-  const index = posts.findIndex((p) => p.id.toString() === id);
-  // 포스트가 없으면 오류를 반환
-  if (index === -1) {
-    ctx.status = 404;
-    ctx.body = {
-      message: '포스트가 존재하지 않습니다.',
-    };
+  try {
+    await Post.findByIdAndRemove(id).exec();
+    ctx.status = 204;
+  } catch (e) {
+    ctx.throw(500, e);
+  }
+};
+
+/*
+  PATCH /api/posts/:id
+  {
+    title: '수정',
+    body: '수정 내용',
+    tags: ['수정', '태그']
+  }
+*/
+export const update = async (ctx) => {
+  const { id } = ctx.params;
+
+  // write에서 사용한 schema와 비슷하지만 required()가 없다.
+  const schema = Joi.object().keys({
+    title: Joi.string(),
+    body: Joi.string(),
+    tags: Joi.array().items(Joi.string()),
+  });
+
+  // 검증 후 실패인 경우 에러 처리
+  const result = schema.validate(ctx.request.body);
+  if (result.error) {
+    ctx.status = 400;
+    ctx.body = result.error;
     return;
   }
-  // 기존 값에 정보를 덮어 씌운다.
-  posts[index] = {
-    ...posts[index],
-    ...ctx.request.body,
-  };
-  ctx.body = posts[index];
+
+  try {
+    const post = await Post.findByIdAndUpdate(id, ctx.request.body, {
+      new: true, // 이 값을 설정하면 업데이트된 데이터를 반환한다.
+      // false일 때는 업데이트되기 전의 데이터를 반환
+    }).exec();
+    if (!post) {
+      ctx.status = 404;
+      return;
+    }
+    ctx.body = post;
+  } catch (e) {
+    ctx.throw(500, e);
+  }
 };

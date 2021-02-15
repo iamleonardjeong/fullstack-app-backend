@@ -4,18 +4,23 @@ import Router from 'koa-router';
 import bodyParser from 'koa-bodyparser';
 import mongoose from 'mongoose';
 
+import api from './api';
+// fakedata 생성 함수
+import createFakeData from './createFakeData';
+
 const { PORT, MONGO_URI } = process.env;
 
+// DB 연결
 mongoose
   .connect(MONGO_URI, { useNewUrlParser: true, useFindAndModify: false })
   .then(() => {
     console.log('Connected to MongoDB');
+    // createFakeData();
   })
   .catch((e) => {
     console.error(e);
   });
 
-import api from './api';
 // Koa의 미들웨어 함수는 두 개의 파라미터를 받는다.
 // 첫 번째 파라미터는 ctx라는 값이고 두 번째 파라미터는 next다.
 // ctx는 Context의 줄임말고 웹 요청과 응답에 관한 정보를 지닌다.
