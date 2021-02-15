@@ -14,6 +14,7 @@ import Joi from 'joi';
 // sort() 함수로 내림차순 정렬
 // limit() 함수로 보이는 개 수 제한
 // skip() 페이지 기능 구현
+// lean() 처음부터 JSON 형태로 조회할 수 있다.
 
 const { ObjectId } = mongoose.Types;
 
@@ -21,13 +22,24 @@ const { ObjectId } = mongoose.Types;
 // 잘못된 id를 전달했다면 클아이언트가 요청을 잘못 보낸 것이니 400 Bad Request 오류를 띄워 주는 것이 맞다.
 // 그러려면 id 값이 올바른 ObjectId인지 확인해야 한다.
 // 이를 검증하기 위한 미들웨어 함수 생성
-export const checkObjectId = (ctx, next) => {
+export const getPostById = async (ctx, next) => {
   const { id } = ctx.params;
   if (!ObjectId.isValid(id)) {
     ctx.status = 400;
     return;
   }
-  return next();
+  try {
+    const post = await Post.findById(id);
+    // 포스트가 존재하지 않을 때
+    if (!post) {
+      ctx.status = 404; // Not Found
+      return;
+    }
+    ctx.state.post = post;
+    return next();
+  } catch (e) {
+    ctx.throw(500, e);
+  }
 };
 
 /*
@@ -61,6 +73,8 @@ export const write = async (ctx) => {
     title,
     body,
     tags,
+    // 작성한 유저 정보 입력
+    user: ctx.state.user,
   });
   try {
     await post.save();
@@ -71,7 +85,7 @@ export const write = async (ctx) => {
 };
 
 /*
-  GET /api/posts
+  GET /api/posts?username=&tag=&page=
 */
 export const list = async (ctx) => {
   // query는 문자열이기 때문에 숫자로 변환해야 한다.
@@ -83,11 +97,18 @@ export const list = async (ctx) => {
     return;
   }
 
+  const { tag, username } = ctx.query;
+  // tag, username 값이 유효하면 객체에 넣고, 그렇지 않으면 넣지 않음
+  const query = {
+    ...(username ? { 'user.username': username } : {}),
+    ...(tag ? { tags: tag } : {}),
+  };
+
   try {
     // find() 함수에 exec() 함수를 붙여주어야 서버에 쿼리를 요청한다.
     // sort 함수로 내림차순 정렬
     // limit 함수로 보이는 개 수 제한
-    const posts = await Post.find() //
+    const posts = await Post.find(query) //
       .sort({ _id: -1 })
       .limit(10)
       .skip((page - 1) * 10)
@@ -98,6 +119,7 @@ export const list = async (ctx) => {
     ctx.set('Last-Page', Math.ceil(postCount / 10));
 
     ctx.body = posts //
+      // find()를 통해 조회한 데이터는 mongoose 문서 인스턴스 형태이므로 toJSON() 함수로 JSON 형태로 변환한 뒤 변형을 일으켜야 한다.
       .map((post) => post.toJSON())
       .map((post) => ({
         ...post,
@@ -113,17 +135,18 @@ export const list = async (ctx) => {
   GET /api/posts/:id
 */
 export const read = async (ctx) => {
-  const { id } = ctx.params;
-  try {
-    const post = await Post.findById(id).exec();
-    if (!post) {
-      ctx.status = 404; // Not Found
-      return;
-    }
-    ctx.body = post;
-  } catch (e) {
-    ctx.throw(500, e);
-  }
+  // const { id } = ctx.params;
+  // try {
+  //   const post = await Post.findById(id).exec();
+  //   if (!post) {
+  //     ctx.status = 404; // Not Found
+  //     return;
+  //   }
+  //   ctx.body = post;
+  // } catch (e) {
+  //   ctx.throw(500, e);
+  // }
+  ctx.body = ctx.state.post;
 };
 
 /*
@@ -178,4 +201,13 @@ export const update = async (ctx) => {
   } catch (e) {
     ctx.throw(500, e);
   }
+};
+
+export const checkOwnPost = (ctx, next) => {
+  const { user, post } = ctx.state;
+  if (post.user._id.toString() !== user._id) {
+    ctx.status = 403;
+    return;
+  }
+  return next();
 };

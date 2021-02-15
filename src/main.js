@@ -5,6 +5,7 @@ import bodyParser from 'koa-bodyparser';
 import mongoose from 'mongoose';
 
 import api from './api';
+import jwtMiddleware from './lib/jwtMiddleware';
 // fakedata 생성 함수
 import createFakeData from './createFakeData';
 
@@ -34,6 +35,7 @@ router.use('/api', api.routes()); // api 라우트 적용
 
 // 라우터 적용 전에 bodyParser 적용
 app.use(bodyParser());
+app.use(jwtMiddleware);
 
 // app 인스턴스에 라우터 적용
 app.use(router.routes()).use(router.allowedMethods());
